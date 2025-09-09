@@ -149,6 +149,7 @@ export const Dashboard = () => {
               variant="outline" 
               size="lg" 
               className="p-8 h-auto flex flex-col items-center gap-4 card-elevated hover:bg-primary/5"
+              onClick={() => window.location.href = '/tracker'}
             >
               <Calendar className="h-8 w-8 text-primary" />
               <div>
@@ -161,6 +162,7 @@ export const Dashboard = () => {
               variant="outline" 
               size="lg" 
               className="p-8 h-auto flex flex-col items-center gap-4 card-elevated hover:bg-primary/5"
+              onClick={() => window.location.href = '/tracker'}
             >
               <BookOpen className="h-8 w-8 text-primary" />
               <div>
