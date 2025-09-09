@@ -459,7 +459,9 @@ export const Tracker = () => {
           analysisDay: prefs.analysisDay,
           analysisMinutes: prefs.analysisMinutes,
           analysisStartWeek,
-          minDailyMinutes: 180,
+          minDailyWeekdayMinutes: 180,
+          minDailyWeekendMinutes: 360,
+          paragraphMinutes: 20,
         });
         saveSchedule(userId, selectedWeek, plan);
         setScheduleVersion((v) => v + 1);
@@ -785,7 +787,9 @@ export const Tracker = () => {
                       analysisDay: prefs.analysisDay,
                       analysisMinutes: prefs.analysisMinutes,
                       analysisStartWeek,
-                      minDailyMinutes: 180,
+                      minDailyWeekdayMinutes: 180,
+                      minDailyWeekendMinutes: 360,
+                      paragraphMinutes: 20,
                     });
                     saveSchedule(userId, selectedWeek, plan);
                     setScheduleVersion((v) => v + 1);
