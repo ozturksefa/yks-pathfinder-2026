@@ -55,9 +55,7 @@ export const DailyScheduler = () => {
       analysisDay,
       analysisMinutes,
       analysisStartWeek,
-      minDailyWeekdayMinutes: 180,
-      minDailyWeekendMinutes: 360,
-      paragraphMinutes: 20,
+      minDailyMinutes: 180,
     });
     saveSchedule(userId, week, plan);
     setSchedule(plan);

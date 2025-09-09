@@ -77,10 +77,7 @@ export type OptimizeOptions = {
   analysisDay?: number | null;
   analysisMinutes?: number;
   analysisStartWeek?: number; // schedule analysis only from this week onward
-  minDailyMinutes?: number; // (fallback) enforce min capacity on non-off days
-  minDailyWeekdayMinutes?: number; // Mon-Fri minimum
-  minDailyWeekendMinutes?: number; // Sat-Sun minimum
-  paragraphMinutes?: number; // daily paragraph routine per working day
+  minDailyMinutes?: number; // enforce min capacity on non-off days
 };
 
 export type ScheduledItem = {
@@ -101,14 +98,12 @@ const subjectWeight: Record<string, number> = {
 export function optimizeWeekSchedule(opts: OptimizeOptions): WeekSchedule {
   const { week, topics, availability } = opts;
   const off = new Set(opts.offDays || []);
-  const minDailyWeekday = opts.minDailyWeekdayMinutes ?? opts.minDailyMinutes ?? 0;
-  const minDailyWeekend = opts.minDailyWeekendMinutes ?? opts.minDailyMinutes ?? 0;
+  const minDaily = opts.minDailyMinutes ?? 0;
   const remain = availability.map((m, day) => {
     if (off.has(day)) return 0;
     const base = Math.max(0, m || 0);
-    const minForDay = day <= 4 ? minDailyWeekday : minDailyWeekend;
-    // Enforce minimum only if day is not off
-    return Math.max(base, minForDay);
+    // Enforce minimum only if day is not off and user provided some capacity or wants minDaily
+    return Math.max(base, minDaily);
   });
   const plan: WeekSchedule = {};
 
@@ -152,27 +147,6 @@ export function optimizeWeekSchedule(opts: OptimizeOptions): WeekSchedule {
     }
   }
 
-  // Daily paragraph routine (after blocking exam/analysis so that routine fits into remaining time)
-  const paragraph = Math.max(0, opts.paragraphMinutes ?? 0);
-  if (paragraph > 0) {
-    for (let d = 0; d < 7; d++) {
-      if (off.has(d)) continue;
-      const left = remain[d] || 0;
-      if (left >= paragraph) {
-        plan[d] = plan[d] || [];
-        plan[d].push({
-          topicKey: `week_${week}_paragraph_day_${d}`,
-          topicTitle: `Türkçe Paragraf Çalışması`,
-          subKey: `week_${week}_paragraph_day_${d}`,
-          label: `Türkçe Paragraf • ${paragraph} dk`,
-          minutes: paragraph,
-          subject: 'Türkçe',
-        });
-        remain[d] = left - paragraph;
-      }
-    }
-  }
-
   // Build items list for all topics
   type Task = { title: string; subject: string; weight: number; part: SubPart; topicIndex: number; partIndex: number };
   const tasks: Task[] = [];
@@ -201,12 +175,9 @@ export function optimizeWeekSchedule(opts: OptimizeOptions): WeekSchedule {
     for (const d of dayPref) {
       if (off.has(d)) continue;
       const left = remain[d] || 0;
-      const heavy = t.part.minutes >= 60 ? 1 : 0;
-      const weekendBonus = (d >= 5 && heavy) ? 25 : 0; // push heavy parts to weekend if possible
       const score = (left - t.part.minutes) // prefer enough capacity
         - (lastSubjectOfDay(d) === t.subject ? 50 : 0) // avoid same subject consecutive
-        + (20 - d) // early in week bonus
-        + weekendBonus;
+        + (20 - d); // early in week bonus
       if (left >= t.part.minutes && score > bestScore) {
         bestScore = score;
         bestDay = d;
