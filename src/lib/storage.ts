@@ -237,6 +237,109 @@ export function importUserData(userId: string, data: any) {
   } catch {}
 }
 
+// Subject templates (minutes per subtask)
+export type SubjectKey = 'Matematik'|'Fizik'|'Kimya'|'Biyoloji'|'Türkçe'|'Tarih'|'Coğrafya'|'Diğer';
+export type TemplateMinutes = { Konu: number; Soru: number; Tekrar: number };
+export type TemplatesMap = Record<SubjectKey, TemplateMinutes>;
+
+function templatesKey(userId: string) { return keyFor(userId, 'templates'); }
+
+export function defaultTemplates(): TemplatesMap {
+  return {
+    Matematik: { Konu: 70, Soru: 50, Tekrar: 20 },
+    Fizik: { Konu: 70, Soru: 50, Tekrar: 20 },
+    Kimya: { Konu: 60, Soru: 40, Tekrar: 20 },
+    Biyoloji: { Konu: 60, Soru: 40, Tekrar: 20 },
+    Türkçe: { Konu: 45, Soru: 35, Tekrar: 15 },
+    Tarih: { Konu: 45, Soru: 35, Tekrar: 15 },
+    Coğrafya: { Konu: 45, Soru: 35, Tekrar: 15 },
+    Diğer: { Konu: 45, Soru: 35, Tekrar: 15 },
+  };
+}
+
+export function loadTemplates(userId: string): TemplatesMap {
+  try {
+    const raw = localStorage.getItem(templatesKey(userId));
+    if (!raw) {
+      const d = defaultTemplates();
+      localStorage.setItem(templatesKey(userId), JSON.stringify(d));
+      return d;
+    }
+    const parsed = JSON.parse(raw);
+    return { ...defaultTemplates(), ...parsed } as TemplatesMap;
+  } catch {
+    return defaultTemplates();
+  }
+}
+
+export function saveTemplates(userId: string, t: TemplatesMap) {
+  try { localStorage.setItem(templatesKey(userId), JSON.stringify(t)); } catch {}
+}
+
+// Pomodoro settings
+export type PomodoroSettings = {
+  sound: boolean;
+  notifications: boolean;
+  autoBreak: boolean;
+  preset25: { work: number; break: number };
+  preset50: { work: number; break: number };
+};
+
+function pomodoroKey(userId: string) { return keyFor(userId, 'pomodoro'); }
+
+export function loadPomodoroSettings(userId: string): PomodoroSettings {
+  try {
+    const raw = localStorage.getItem(pomodoroKey(userId));
+    if (!raw) {
+      const d: PomodoroSettings = { sound: true, notifications: true, autoBreak: true, preset25: { work: 25, break: 5 }, preset50: { work: 50, break: 10 } };
+      localStorage.setItem(pomodoroKey(userId), JSON.stringify(d));
+      return d;
+    }
+    const p = JSON.parse(raw);
+    return {
+      sound: p.sound ?? true,
+      notifications: p.notifications ?? true,
+      autoBreak: p.autoBreak ?? true,
+      preset25: p.preset25 ?? { work: 25, break: 5 },
+      preset50: p.preset50 ?? { work: 50, break: 10 },
+    } as PomodoroSettings;
+  } catch {
+    return { sound: true, notifications: true, autoBreak: true, preset25: { work: 25, break: 5 }, preset50: { work: 50, break: 10 } };
+  }
+}
+
+export function savePomodoroSettings(userId: string, s: PomodoroSettings) {
+  try { localStorage.setItem(pomodoroKey(userId), JSON.stringify(s)); } catch {}
+}
+
+// Exam/analysis defaults
+export type ExamPrefs = { weekly: boolean; day: number|null; minutes: number; analysisDay: number|null; analysisMinutes: number };
+function examPrefsKey(userId: string) { return keyFor(userId, 'examPrefs'); }
+
+export function loadExamPrefs(userId: string): ExamPrefs {
+  try {
+    const raw = localStorage.getItem(examPrefsKey(userId));
+    if (!raw) {
+      const d: ExamPrefs = { weekly: true, day: 6, minutes: 180, analysisDay: 0, analysisMinutes: 60 };
+      localStorage.setItem(examPrefsKey(userId), JSON.stringify(d));
+      return d;
+    }
+    const p = JSON.parse(raw);
+    return {
+      weekly: !!p.weekly,
+      day: (p.day ?? 6),
+      minutes: (p.minutes ?? 180),
+      analysisDay: (p.analysisDay ?? 0),
+      analysisMinutes: (p.analysisMinutes ?? 60),
+    } as ExamPrefs;
+  } catch {
+    return { weekly: true, day: 6, minutes: 180, analysisDay: 0, analysisMinutes: 60 };
+  }
+}
+
+export function saveExamPrefs(userId: string, e: ExamPrefs) {
+  try { localStorage.setItem(examPrefsKey(userId), JSON.stringify(e)); } catch {}
+}
 // Availability (minutes per day Mon..Sun)
 export type Availability = [number, number, number, number, number, number, number];
 
@@ -265,7 +368,7 @@ export function saveAvailability(userId: string, a: Availability) {
 }
 
 // Schedule per week
-export type ScheduledItem = { topicKey: string; topicTitle: string };
+export type ScheduledItem = { topicKey: string; topicTitle: string; subKey?: string; label?: string; minutes?: number; subject?: string };
 export type WeekSchedule = Record<number, ScheduledItem[]>; // 0..6
 
 function scheduleKey(userId: string, week: number) {

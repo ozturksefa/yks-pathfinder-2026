@@ -11,6 +11,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { useMemo } from "react";
 import { studyPlan } from "@/data/studyPlan";
+import { decomposeTopic, totalSubtasksForPlan } from "@/lib/schedule";
 import { getActiveUserId, loadCompletedTopics, loadSessions, loadGoals, addGoal, toggleGoal, deleteGoal, getNotes, setNotes, exportUserData, importUserData } from "@/lib/storage";
 import { useState } from "react";
 
@@ -18,14 +19,7 @@ export const Dashboard = () => {
   const userId = getActiveUserId();
   const completed = useMemo(() => loadCompletedTopics(userId), [userId]);
 
-  const TOTAL_TOPICS = useMemo(() => {
-    let total = 0;
-    for (let w = 1; w <= studyPlan.totalWeeks; w++) {
-      const topics = (studyPlan as any).weeklyPlan[w]?.topics ?? [];
-      total += topics.length;
-    }
-    return total;
-  }, []);
+  const TOTAL_TOPICS = useMemo(() => totalSubtasksForPlan((studyPlan as any).weeklyPlan), []);
 
   const startDate = new Date(studyPlan.startDate);
   const today = new Date();
@@ -78,25 +72,38 @@ export const Dashboard = () => {
   }
 
   const subjectList = ["Matematik", "Fizik", "Kimya", "Biyoloji"].map((name) => {
-    const rec = bySubject.get(name) ?? { total: 0, done: 0, color: colorMap[name] };
-    // Next topic: ilk tamamlanmamış olan
+    // compute totals and done as subtasks
+    let total = 0;
+    let done = 0;
     let nextTopic = "";
     outer: for (let w = 1; w <= studyPlan.totalWeeks; w++) {
       const topics: string[] = (studyPlan as any).weeklyPlan[w]?.topics ?? [];
       for (let i = 0; i < topics.length; i++) {
         const t = topics[i];
         if (normalizeSubject(t) !== name) continue;
-        const key = `week_${w}_topic_${i}`;
-        if (!completed.has(key)) { nextTopic = t; break outer; }
+        const parts = decomposeTopic(t);
+        total += parts.length;
+        const topicKey = `week_${w}_topic_${i}`;
+        if (completed.has(topicKey)) {
+          done += parts.length;
+        } else {
+          let allSub = true;
+          for (let j = 0; j < parts.length; j++) {
+            const sk = `${topicKey}_part_${j}`;
+            if (!completed.has(sk)) { allSub = false; }
+            else done += 1;
+          }
+          if (!allSub && !nextTopic) nextTopic = t;
+        }
       }
     }
-    const progress = rec.total ? Math.round((rec.done / rec.total) * 100) : 0;
+    const progress = total ? Math.round((done / total) * 100) : 0;
     return {
       subject: name,
-      color: rec.color as any,
+      color: colorMap[name] as any,
       progress,
-      totalTopics: rec.total,
-      completedTopics: rec.done,
+      totalTopics: total,
+      completedTopics: done,
       nextTopic: nextTopic || "Sıradaki konular planlandı",
     };
   });

@@ -9,9 +9,12 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 import { CalendarDays, CheckCircle2, Circle, Clock, Target, PlusCircle, Play, Square, Timer } from "lucide-react";
 import { getActiveUserId, loadCompletedTopics, saveCompletedTopics, clearCompletedTopics, getActiveTimer, setActiveTimer } from "@/lib/storage";
-import { loadSessions, addSession, loadSchedule } from "@/lib/storage";
+import { loadSessions, addSession, loadSchedule, loadAvailability, loadExamPrefs, saveSchedule } from "@/lib/storage";
 import { LogStudyDialog } from "@/components/LogStudyDialog";
+import { PomodoroSettings } from "@/components/PomodoroSettings";
+import { loadPomodoroSettings } from "@/lib/storage";
 import { toast } from "@/components/ui/sonner";
+import { decomposeTopic, totalSubtasksForPlan, optimizeWeekSchedule } from "@/lib/schedule";
 
 const LogButton = ({ topicKey, topicTitle }: { topicKey: string; topicTitle: string }) => {
   const [open, setOpen] = useState(false);
@@ -418,11 +421,51 @@ export const Tracker = () => {
   const [activeTimer, setActiveTimerState] = useState<ReturnType<typeof getActiveTimer>>(null);
   const [elapsed, setElapsed] = useState<number>(0);
   const [remaining, setRemaining] = useState<number | null>(null);
+  const [scheduleVersion, setScheduleVersion] = useState<number>(0);
 
   useEffect(() => {
     setCompletedTopics(loadCompletedTopics(userId));
     setActiveTimerState(getActiveTimer(userId));
   }, [userId]);
+
+  // Auto-generate weekly schedule if missing for selected week
+  useEffect(() => {
+    try {
+      const schedule = loadSchedule(userId, selectedWeek) as any;
+      const hasItems = schedule && Object.keys(schedule).some((d) => (schedule[d] || []).length > 0);
+      if (!hasItems) {
+        const topics = getWeeklyPlan(selectedWeek);
+        const availability = loadAvailability(userId);
+        const offDays = availability.map((m, i) => (m ? -1 : i)).filter((i) => i >= 0);
+        const prefs = loadExamPrefs(userId);
+        const analysisStartWeek = (() => {
+          try {
+            const plan: any = (studyPlan as any).weeklyPlan || {};
+            let lastTYT = 1;
+            for (let w = 1; w <= (studyPlan as any).totalWeeks; w++) {
+              const ts: string[] = plan[w]?.topics ?? [];
+              if (ts.some((t) => t.toLowerCase().includes('tyt'))) lastTYT = w;
+            }
+            return Math.max(1, lastTYT - 2);
+          } catch { return 14; }
+        })();
+        const plan = optimizeWeekSchedule({
+          week: selectedWeek,
+          topics,
+          availability,
+          offDays,
+          examDay: prefs.weekly ? prefs.day : null,
+          examMinutes: prefs.minutes,
+          analysisDay: prefs.analysisDay,
+          analysisMinutes: prefs.analysisMinutes,
+          analysisStartWeek,
+          minDailyMinutes: 180,
+        });
+        saveSchedule(userId, selectedWeek, plan);
+        setScheduleVersion((v) => v + 1);
+      }
+    } catch {}
+  }, [userId, selectedWeek]);
 
   useEffect(() => {
     let t: any;
@@ -457,6 +500,8 @@ export const Tracker = () => {
 
   function beep(freq = 880, ms = 400) {
     try {
+      const settings = loadPomodoroSettings(userId);
+      if (!settings.sound) return;
       const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
       const o = ctx.createOscillator();
       const g = ctx.createGain();
@@ -472,13 +517,14 @@ export const Tracker = () => {
 
   const startPomodoro = (topicKey: string, topicTitle: string, workMin: number, breakMin: number, preset: string) => {
     requestNotifyPermission();
+    const settings = loadPomodoroSettings(userId);
     const timer = {
       topicKey,
       topicTitle,
       startedAt: new Date().toISOString(),
       mode: 'focus' as const,
-      durationSec: workMin * 60,
-      breakSec: breakMin * 60,
+      durationSec: (settings.preset25.work === workMin ? settings.preset25.work : workMin) * 60,
+      breakSec: (settings.preset25.break === breakMin ? settings.preset25.break : breakMin) * 60,
       preset,
     };
     setActiveTimer(userId, timer as any);
@@ -515,7 +561,7 @@ export const Tracker = () => {
     if (!activeTimer) return;
     // Beep + toast + notification
     beep();
-    try { if (typeof Notification !== 'undefined' && Notification.permission === 'granted') new Notification('Süre doldu', { body: activeTimer.topicTitle }); } catch {}
+    try { const s = loadPomodoroSettings(userId); if (s.notifications && typeof Notification !== 'undefined' && Notification.permission === 'granted') new Notification('Süre doldu', { body: activeTimer.topicTitle }); } catch {}
 
     if (activeTimer.mode === 'focus') {
       try {
@@ -531,7 +577,8 @@ export const Tracker = () => {
       toast("Odak süresi bitti", {
         description: breakMin ? `Mola (${breakMin} dk) başlatmak ister misin?` : undefined,
       });
-      if (breakSec > 0) {
+      const prefs = loadPomodoroSettings(userId);
+      if (breakSec > 0 && prefs.autoBreak) {
         const timer = {
           topicKey: activeTimer.topicKey,
           topicTitle: activeTimer.topicTitle + ' • Mola',
@@ -552,12 +599,7 @@ export const Tracker = () => {
   };
 
   const TOTAL_TOPICS = useMemo(() => {
-    let total = 0;
-    for (let w = 1; w <= studyPlan.totalWeeks; w++) {
-      const topics = (studyPlan as any).weeklyPlan[w]?.topics ?? [];
-      total += topics.length;
-    }
-    return total;
+    return totalSubtasksForPlan((studyPlan as any).weeklyPlan);
   }, []);
 
   const toggleTopic = (topicKey: string) => {
@@ -596,9 +638,27 @@ export const Tracker = () => {
 
     for (let week = startWeek; week <= endWeek; week++) {
       const weekTopics = getWeeklyPlan(week);
-      totalTopics += weekTopics.length;
-      const keys = weekTopics.map((_, i) => `week_${week}_topic_${i}`);
-      completedCount += keys.filter(k => completedTopics.has(k)).length;
+      const schedule = loadSchedule(userId, week) as any;
+      if (schedule && Object.keys(schedule).length) {
+        const items: string[] = [];
+        for (let d = 0; d < 7; d++) {
+          for (const it of (schedule[d] || [])) {
+            if (it.subKey) items.push(it.subKey);
+          }
+        }
+        totalTopics += items.length;
+        completedCount += items.filter(k => completedTopics.has(k)).length;
+      } else {
+        // fallback by decomposed parts
+        weekTopics.forEach((t, i) => {
+          const parts = decomposeTopic(t);
+          totalTopics += parts.length;
+          const topicKey = `week_${week}_topic_${i}`;
+          const topicDone = completedTopics.has(topicKey);
+          if (topicDone) completedCount += parts.length;
+          else parts.forEach((_, j) => { if (completedTopics.has(`${topicKey}_part_${j}`)) completedCount += 1; });
+        });
+      }
     }
 
     return { totalTopics, completedCount, percentage: totalTopics > 0 ? (completedCount / totalTopics) * 100 : 0 };
@@ -691,12 +751,46 @@ export const Tracker = () => {
               <TabsTrigger value="weekly">Haftalık Takip</TabsTrigger>
               <TabsTrigger value="monthly">Aylık Takip</TabsTrigger>
             </TabsList>
+            <PomodoroSettings />
 
             {/* Weekly View */}
             <TabsContent value="weekly" className="space-y-6">
               {/* This Week Schedule */}
               <Card className="p-6">
-                <h3 className="text-xl font-semibold mb-4">Bu Haftanın Planı</h3>
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-xl font-semibold">Bu Haftanın Planı</h3>
+                  <Button variant="outline" size="sm" onClick={() => {
+                    const topics = getWeeklyPlan(selectedWeek);
+                    const availability = loadAvailability(userId);
+                    const offDays = availability.map((m, i) => (m ? -1 : i)).filter((i) => i >= 0);
+                    const prefs = loadExamPrefs(userId);
+                    const analysisStartWeek = (() => {
+                      try {
+                        const plan: any = (studyPlan as any).weeklyPlan || {};
+                        let lastTYT = 1;
+                        for (let w = 1; w <= (studyPlan as any).totalWeeks; w++) {
+                          const ts: string[] = plan[w]?.topics ?? [];
+                          if (ts.some((t) => t.toLowerCase().includes('tyt'))) lastTYT = w;
+                        }
+                        return Math.max(1, lastTYT - 2);
+                      } catch { return 14; }
+                    })();
+                    const plan = optimizeWeekSchedule({
+                      week: selectedWeek,
+                      topics,
+                      availability,
+                      offDays,
+                      examDay: prefs.weekly ? prefs.day : null,
+                      examMinutes: prefs.minutes,
+                      analysisDay: prefs.analysisDay,
+                      analysisMinutes: prefs.analysisMinutes,
+                      analysisStartWeek,
+                      minDailyMinutes: 180,
+                    });
+                    saveSchedule(userId, selectedWeek, plan);
+                    setScheduleVersion((v) => v + 1);
+                  }}>Yeniden Planla</Button>
+                </div>
                 <div className="grid grid-cols-2 md:grid-cols-7 gap-3">
                   {(() => {
                     const schedule = loadSchedule(userId, selectedWeek) as any;
@@ -708,11 +802,28 @@ export const Tracker = () => {
                           {(schedule[idx] || []).length === 0 && (
                             <div className="text-xs text-muted-foreground">Atama yok</div>
                           )}
-                          {(schedule[idx] || []).map((it: any) => (
-                            <div key={it.topicKey} className="text-xs p-2 bg-muted rounded">
-                              {it.topicTitle}
-                            </div>
-                          ))}
+                          {(schedule[idx] || []).map((it: any) => {
+                            const key = it.subKey || it.topicKey;
+                            const done = completedTopics.has(key) || completedTopics.has(it.topicKey);
+                            return (
+                              <label key={key} className={`flex items-center justify-between gap-2 text-xs p-2 bg-muted rounded ${done ? 'line-through text-muted-foreground' : ''}`}>
+                                <div className="flex items-center gap-2">
+                                  <Checkbox
+                                    checked={done}
+                                    onCheckedChange={() => {
+                                      const updated = new Set(completedTopics);
+                                      if (updated.has(it.topicKey)) updated.delete(it.topicKey);
+                                      if (updated.has(key)) updated.delete(key); else updated.add(key);
+                                      setCompletedTopics(updated);
+                                      saveCompletedTopics(userId, updated);
+                                    }}
+                                  />
+                                  <span>{it.label || it.topicTitle}</span>
+                                </div>
+                                {typeof it.minutes === 'number' && (<span className="text-[11px] text-muted-foreground">{it.minutes} dk</span>)}
+                              </label>
+                            );
+                          })}
                         </div>
                       </div>
                     ));
@@ -794,8 +905,30 @@ export const Tracker = () => {
                             {topic}
                           </div>
                           <div className="text-sm text-muted-foreground flex items-center gap-2">
-                            <span>{index === 0 ? "Ana Konu" : index === 1 ? "Destekleyici Konu" : "Pekiştirme Konusu"} • Tahmini Süre: 2-3 saat</span>
+                            <span>{index === 0 ? "Ana Konu" : index === 1 ? "Destekleyici Konu" : "Pekiştirme Konusu"}</span>
                             {dayLabel && (<span className="px-2 py-0.5 border rounded text-xs">Planlı: {dayLabel}</span>)}
+                          </div>
+                          <div className="mt-2 grid grid-cols-1 md:grid-cols-3 gap-2">
+                            {decomposeTopic(topic).map((p, j) => {
+                              const subKey = `${topicKey}_part_${j}`;
+                              const done = completedTopics.has(topicKey) || completedTopics.has(subKey);
+                              return (
+                                <label key={subKey} className={`flex items-center gap-2 text-xs p-2 border rounded ${done ? 'line-through text-muted-foreground' : ''}`}>
+                                  <Checkbox
+                                    checked={done}
+                                    onCheckedChange={() => {
+                                      const updated = new Set(completedTopics);
+                                      if (updated.has(topicKey)) updated.delete(topicKey);
+                                      const has = updated.has(subKey);
+                                      if (has) updated.delete(subKey); else updated.add(subKey);
+                                      setCompletedTopics(updated);
+                                      saveCompletedTopics(userId, updated);
+                                    }}
+                                  />
+                                  <span>{p.part} • {p.minutes} dk</span>
+                                </label>
+                              );
+                            })}
                           </div>
                         </div>
                         <div className="flex items-center gap-2">
