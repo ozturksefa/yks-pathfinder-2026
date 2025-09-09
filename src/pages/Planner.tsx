@@ -1,4 +1,5 @@
 import { StudyPlanWizard } from "@/components/StudyPlanWizard";
+import { DailyScheduler } from "@/components/DailyScheduler";
 import { Navigation } from "@/components/Navigation";
 import { Footer } from "@/components/Footer";
 import { Button } from "@/components/ui/button";
@@ -75,6 +76,9 @@ export const Planner = () => {
             </Button>
           </div>
         </div>
+        
+        {/* Daily Scheduler */}
+        <DailyScheduler />
         </div>
       </div>
 

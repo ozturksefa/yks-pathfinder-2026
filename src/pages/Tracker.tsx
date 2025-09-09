@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Navigation } from "@/components/Navigation";
 import { Footer } from "@/components/Footer";
 import { Button } from "@/components/ui/button";
@@ -7,7 +7,23 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Progress } from "@/components/ui/progress";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
-import { CalendarDays, CheckCircle2, Circle, Clock, Target } from "lucide-react";
+import { CalendarDays, CheckCircle2, Circle, Clock, Target, PlusCircle, Play, Square, Timer } from "lucide-react";
+import { getActiveUserId, loadCompletedTopics, saveCompletedTopics, clearCompletedTopics, getActiveTimer, setActiveTimer } from "@/lib/storage";
+import { loadSessions, addSession, loadSchedule } from "@/lib/storage";
+import { LogStudyDialog } from "@/components/LogStudyDialog";
+import { toast } from "@/components/ui/sonner";
+
+const LogButton = ({ topicKey, topicTitle }: { topicKey: string; topicTitle: string }) => {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <Button variant="outline" size="sm" onClick={() => setOpen(true)} className="mr-2">
+        <PlusCircle className="h-4 w-4 mr-1" /> Süre Ekle
+      </Button>
+      <LogStudyDialog open={open} onOpenChange={setOpen} topicKey={topicKey} topicTitle={topicTitle} />
+    </>
+  );
+};
 
 const studyPlan = {
   startDate: "2025-09-10",
@@ -398,15 +414,161 @@ export const Tracker = () => {
   const [completedTopics, setCompletedTopics] = useState<Set<string>>(new Set());
   const [selectedWeek, setSelectedWeek] = useState(1);
   const [selectedMonth, setSelectedMonth] = useState(1);
+  const userId = getActiveUserId();
+  const [activeTimer, setActiveTimerState] = useState<ReturnType<typeof getActiveTimer>>(null);
+  const [elapsed, setElapsed] = useState<number>(0);
+  const [remaining, setRemaining] = useState<number | null>(null);
 
-  const toggleTopic = (topic: string) => {
-    const newCompleted = new Set(completedTopics);
-    if (newCompleted.has(topic)) {
-      newCompleted.delete(topic);
+  useEffect(() => {
+    setCompletedTopics(loadCompletedTopics(userId));
+    setActiveTimerState(getActiveTimer(userId));
+  }, [userId]);
+
+  useEffect(() => {
+    let t: any;
+    if (activeTimer) {
+      const tick = () => {
+        const started = new Date(activeTimer!.startedAt).getTime();
+        setElapsed(Math.max(0, Math.floor((Date.now() - started) / 1000)));
+        if (activeTimer?.durationSec) {
+          const rem = Math.max(0, activeTimer.durationSec - Math.floor((Date.now() - started) / 1000));
+          setRemaining(rem);
+          if (rem === 0) {
+            handleTimerComplete();
+          }
+        } else {
+          setRemaining(null);
+        }
+      };
+      tick();
+      t = setInterval(tick, 1000);
     } else {
-      newCompleted.add(topic);
+      setElapsed(0);
+      setRemaining(null);
     }
-    setCompletedTopics(newCompleted);
+    return () => t && clearInterval(t);
+  }, [activeTimer]);
+
+  function requestNotifyPermission() {
+    if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
+      try { Notification.requestPermission(); } catch {}
+    }
+  }
+
+  function beep(freq = 880, ms = 400) {
+    try {
+      const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const o = ctx.createOscillator();
+      const g = ctx.createGain();
+      o.type = 'sine';
+      o.frequency.value = freq;
+      o.connect(g);
+      g.connect(ctx.destination);
+      o.start();
+      g.gain.exponentialRampToValueAtTime(0.00001, ctx.currentTime + ms/1000);
+      setTimeout(() => { o.stop(); ctx.close(); }, ms + 50);
+    } catch {}
+  }
+
+  const startPomodoro = (topicKey: string, topicTitle: string, workMin: number, breakMin: number, preset: string) => {
+    requestNotifyPermission();
+    const timer = {
+      topicKey,
+      topicTitle,
+      startedAt: new Date().toISOString(),
+      mode: 'focus' as const,
+      durationSec: workMin * 60,
+      breakSec: breakMin * 60,
+      preset,
+    };
+    setActiveTimer(userId, timer as any);
+    setActiveTimerState(timer as any);
+  };
+
+  const startTimer = (topicKey: string, topicTitle: string) => {
+    // If different timer is running, overwrite
+    const timer = { topicKey, topicTitle, startedAt: new Date().toISOString() } as any;
+    setActiveTimer(userId, timer);
+    setActiveTimerState(timer);
+  };
+
+  const stopTimer = () => {
+    if (!activeTimer) return;
+    const started = new Date(activeTimer.startedAt).getTime();
+    const minutes = Math.max(1, Math.round((Date.now() - started) / 60000));
+    // Log session
+    try {
+      if (!activeTimer.durationSec || activeTimer.mode === 'focus') {
+        addSession(userId, {
+          topicKey: activeTimer.topicKey,
+          topicTitle: activeTimer.topicTitle,
+          minutes,
+          date: new Date().toISOString(),
+        });
+      }
+    } catch {}
+    setActiveTimer(userId, null);
+    setActiveTimerState(null);
+  };
+
+  const handleTimerComplete = () => {
+    if (!activeTimer) return;
+    // Beep + toast + notification
+    beep();
+    try { if (typeof Notification !== 'undefined' && Notification.permission === 'granted') new Notification('Süre doldu', { body: activeTimer.topicTitle }); } catch {}
+
+    if (activeTimer.mode === 'focus') {
+      try {
+        addSession(userId, {
+          topicKey: activeTimer.topicKey,
+          topicTitle: activeTimer.topicTitle,
+          minutes: Math.round((activeTimer.durationSec || 0) / 60) || 0,
+          date: new Date().toISOString(),
+        });
+      } catch {}
+      const breakSec = activeTimer.breakSec || 0;
+      const breakMin = Math.round(breakSec / 60);
+      toast("Odak süresi bitti", {
+        description: breakMin ? `Mola (${breakMin} dk) başlatmak ister misin?` : undefined,
+      });
+      if (breakSec > 0) {
+        const timer = {
+          topicKey: activeTimer.topicKey,
+          topicTitle: activeTimer.topicTitle + ' • Mola',
+          startedAt: new Date().toISOString(),
+          mode: 'break' as const,
+          durationSec: breakSec,
+          preset: activeTimer.preset,
+        };
+        setActiveTimer(userId, timer as any);
+        setActiveTimerState(timer as any);
+        return;
+      }
+    } else if (activeTimer.mode === 'break') {
+      toast("Mola bitti", { description: "Hazırsan odaklanmaya dön." });
+    }
+    setActiveTimer(userId, null);
+    setActiveTimerState(null);
+  };
+
+  const TOTAL_TOPICS = useMemo(() => {
+    let total = 0;
+    for (let w = 1; w <= studyPlan.totalWeeks; w++) {
+      const topics = (studyPlan as any).weeklyPlan[w]?.topics ?? [];
+      total += topics.length;
+    }
+    return total;
+  }, []);
+
+  const toggleTopic = (topicKey: string) => {
+    const updated = new Set(completedTopics);
+    if (updated.has(topicKey)) {
+      updated.delete(topicKey);
+    } else {
+      updated.add(topicKey);
+    }
+    setCompletedTopics(updated);
+    saveCompletedTopics(userId, updated);
   };
 
   const getWeeklyPlan = (weekNum: number) => {
@@ -435,7 +597,8 @@ export const Tracker = () => {
     for (let week = startWeek; week <= endWeek; week++) {
       const weekTopics = getWeeklyPlan(week);
       totalTopics += weekTopics.length;
-      completedCount += weekTopics.filter(topic => completedTopics.has(topic)).length;
+      const keys = weekTopics.map((_, i) => `week_${week}_topic_${i}`);
+      completedCount += keys.filter(k => completedTopics.has(k)).length;
     }
 
     return { totalTopics, completedCount, percentage: totalTopics > 0 ? (completedCount / totalTopics) * 100 : 0 };
@@ -482,11 +645,11 @@ export const Tracker = () => {
                 <h3 className="text-lg font-semibold">Genel İlerleme</h3>
               </div>
               <div className="text-3xl font-bold text-primary mb-2">
-                {Math.round((completedTopics.size / 50) * 100)}%
+                {TOTAL_TOPICS ? Math.round((completedTopics.size / TOTAL_TOPICS) * 100) : 0}%
               </div>
-              <Progress value={(completedTopics.size / 50) * 100} className="mb-2" />
+              <Progress value={TOTAL_TOPICS ? (completedTopics.size / TOTAL_TOPICS) * 100 : 0} className="mb-2" />
               <p className="text-sm text-muted-foreground">
-                {completedTopics.size}/50 konu tamamlandı
+                {completedTopics.size}/{TOTAL_TOPICS} konu tamamlandı
               </p>
             </Card>
 
@@ -506,13 +669,18 @@ export const Tracker = () => {
             <Card className="p-6 card-elevated">
               <div className="flex items-center gap-3 mb-4">
                 <Clock className="h-8 w-8 text-warning" />
-                <h3 className="text-lg font-semibold">Kalan Süre</h3>
+                <h3 className="text-lg font-semibold">Bu Hafta Çalışma Süresi</h3>
               </div>
               <div className="text-3xl font-bold text-warning mb-2">
-                {40 - selectedWeek} Hafta
+                {(() => {
+                  const sessions = loadSessions(userId);
+                  const prefix = `week_${selectedWeek}_`;
+                  const m = sessions.filter(s => s.topicKey.startsWith(prefix)).reduce((sum, s) => sum + (s.minutes||0), 0);
+                  return `${m} dk`;
+                })()}
               </div>
               <p className="text-sm text-muted-foreground">
-                Sınava kalan hafta sayısı
+                Kaydedilen süre toplamı
               </p>
             </Card>
           </div>
@@ -526,6 +694,31 @@ export const Tracker = () => {
 
             {/* Weekly View */}
             <TabsContent value="weekly" className="space-y-6">
+              {/* This Week Schedule */}
+              <Card className="p-6">
+                <h3 className="text-xl font-semibold mb-4">Bu Haftanın Planı</h3>
+                <div className="grid grid-cols-2 md:grid-cols-7 gap-3">
+                  {(() => {
+                    const schedule = loadSchedule(userId, selectedWeek) as any;
+                    const dayNames = ["Pzt", "Sal", "Çar", "Per", "Cum", "Cmt", "Paz"];
+                    return dayNames.map((name, idx) => (
+                      <div key={idx} className="border rounded-lg p-3">
+                        <div className="text-sm text-muted-foreground mb-2">{name}</div>
+                        <div className="space-y-2">
+                          {(schedule[idx] || []).length === 0 && (
+                            <div className="text-xs text-muted-foreground">Atama yok</div>
+                          )}
+                          {(schedule[idx] || []).map((it: any) => (
+                            <div key={it.topicKey} className="text-xs p-2 bg-muted rounded">
+                              {it.topicTitle}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ));
+                  })()}
+                </div>
+              </Card>
               {/* Week Selector */}
               <Card className="p-6">
                 <h3 className="text-xl font-semibold mb-4">Hafta Seçimi</h3>
@@ -543,6 +736,25 @@ export const Tracker = () => {
                   ))}
                 </div>
               </Card>
+
+              {activeTimer && (
+                <Card className="p-6">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h4 className="font-semibold">Aktif Zamanlayıcı</h4>
+                      <div className="text-sm text-muted-foreground">{activeTimer.topicTitle} {activeTimer.preset ? `(${activeTimer.preset} ${activeTimer.mode==='break'?'mola':'odak'})` : ''}</div>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <div className="font-mono text-lg">
+                        {remaining !== null ? new Date(remaining * 1000).toISOString().substr(14, 5) : new Date(elapsed * 1000).toISOString().substr(11, 8)}
+                      </div>
+                      <Button variant="destructive" onClick={stopTimer}>
+                        <Square className="h-4 w-4 mr-2"/> Durdur ve Kaydet
+                      </Button>
+                    </div>
+                  </div>
+                </Card>
+              )}
 
               {/* Week Details */}
               <Card className="p-6">
@@ -563,6 +775,14 @@ export const Tracker = () => {
                 <div className="space-y-4">
                   {getWeeklyPlan(selectedWeek).map((topic, index) => {
                     const topicKey = `week_${selectedWeek}_topic_${index}`;
+                    const schedule = loadSchedule(userId, selectedWeek) as any;
+                    const plannedDay = (() => {
+                      for (let d = 0; d < 7; d++) {
+                        if ((schedule[d] || []).some((it: any) => it.topicKey === topicKey)) return d;
+                      }
+                      return null;
+                    })();
+                    const dayLabel = plannedDay !== null ? ["Pzt","Sal","Çar","Per","Cum","Cmt","Paz"][plannedDay] : null;
                     return (
                       <div key={topicKey} className="flex items-center gap-4 p-4 border rounded-lg hover:bg-muted/50 transition-smooth">
                         <Checkbox
@@ -573,9 +793,30 @@ export const Tracker = () => {
                           <div className={`font-medium ${completedTopics.has(topicKey) ? 'line-through text-muted-foreground' : ''}`}>
                             {topic}
                           </div>
-                          <div className="text-sm text-muted-foreground">
-                            {index === 0 ? "Ana Konu" : index === 1 ? "Destekleyici Konu" : "Pekiştirme Konusu"} • Tahmini Süre: 2-3 saat
+                          <div className="text-sm text-muted-foreground flex items-center gap-2">
+                            <span>{index === 0 ? "Ana Konu" : index === 1 ? "Destekleyici Konu" : "Pekiştirme Konusu"} • Tahmini Süre: 2-3 saat</span>
+                            {dayLabel && (<span className="px-2 py-0.5 border rounded text-xs">Planlı: {dayLabel}</span>)}
                           </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <LogButton topicKey={topicKey} topicTitle={topic} />
+                          {activeTimer && activeTimer.topicKey === topicKey ? (
+                            <Button variant="secondary" size="sm" onClick={stopTimer}>
+                              <Square className="h-4 w-4 mr-1" /> Durdur
+                            </Button>
+                          ) : (
+                            <>
+                              <Button variant="outline" size="sm" onClick={() => startTimer(topicKey, topic)}>
+                                <Play className="h-4 w-4 mr-1" /> Başlat
+                              </Button>
+                              <Button variant="outline" size="sm" onClick={() => startPomodoro(topicKey, topic, 25, 5, '25/5')}>
+                                <Timer className="h-4 w-4 mr-1" /> 25/5
+                              </Button>
+                              <Button variant="outline" size="sm" onClick={() => startPomodoro(topicKey, topic, 50, 10, '50/10')}>
+                                <Timer className="h-4 w-4 mr-1" /> 50/10
+                              </Button>
+                            </>
+                          )}
                         </div>
                         {completedTopics.has(topicKey) ? (
                           <CheckCircle2 className="h-6 w-6 text-success" />
@@ -640,7 +881,8 @@ export const Tracker = () => {
                     if (weekNum > 40) return null;
                     
                     const weekTopics = getWeeklyPlan(weekNum);
-                    const completedInWeek = weekTopics.filter(topic => completedTopics.has(topic)).length;
+                    const keys = weekTopics.map((_, idx) => `week_${weekNum}_topic_${idx}`);
+                    const completedInWeek = keys.filter(k => completedTopics.has(k)).length;
                     const weekProgress = weekTopics.length > 0 ? (completedInWeek / weekTopics.length) * 100 : 0;
 
                     return (
@@ -664,6 +906,11 @@ export const Tracker = () => {
               </Card>
             </TabsContent>
           </Tabs>
+          <div className="mt-6 flex gap-3 justify-end">
+            <Button variant="outline" onClick={() => { clearCompletedTopics(userId); setCompletedTopics(new Set()); }}>
+              İlerlemeyi Sıfırla
+            </Button>
+          </div>
         </div>
       </div>
 

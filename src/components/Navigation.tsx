@@ -1,6 +1,7 @@
 import { Button } from "@/components/ui/button";
-import { BookOpen, BarChart3, Calendar, Settings } from "lucide-react";
+import { BookOpen, BarChart3, Calendar } from "lucide-react";
 import { Link, useLocation } from "react-router-dom";
+import { ProfileMenu } from "@/components/ProfileMenu";
 
 export const Navigation = () => {
   const location = useLocation();
@@ -9,7 +10,6 @@ export const Navigation = () => {
     { path: '/', label: 'Ana Sayfa', icon: BookOpen },
     { path: '/planner', label: 'Plan Oluştur', icon: Calendar },
     { path: '/tracker', label: 'Takip', icon: BarChart3 },
-    { path: '/settings', label: 'Ayarlar', icon: Settings },
   ];
 
   return (
@@ -42,11 +42,8 @@ export const Navigation = () => {
             })}
           </div>
 
-          {/* Mobile menu - simplified for now */}
-          <div className="md:hidden">
-            <Button variant="ghost" size="sm">
-              Menu
-            </Button>
+          <div>
+            <ProfileMenu />
           </div>
         </div>
       </div>
