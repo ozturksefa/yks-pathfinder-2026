@@ -17,7 +17,7 @@ export const studyPlan = {
         "TYT Geometri: Doğruda Açılar; Üçgende Açılar",
         "TYT Türkçe: Sözcükte Anlam; Deyim ve Atasözü; Söz Yorumu",
         "TYT Fizik: Fizik Bilimine Giriş; Madde ve Özellikleri",
-        "TYT Coğrafya: Doğa ve İnsan; Dünya’nın Şekli ve Hareketleri",
+        "TYT Coğrafya: Doğa ve İnsan; Dünya’nın  Şekli ve Hareketleri",
         "TYT Türkçe: Paragraf Temelleri (Konu–Ana/Yardımcı Düşünce)",
       ],
       focus: "Güçlü zemin: temel kavramlar + paragraf",
