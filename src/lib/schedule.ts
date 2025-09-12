@@ -168,6 +168,7 @@ export function optimizeWeekSchedule(opts: OptimizeOptions): WeekSchedule {
     return arr.length ? arr[arr.length - 1].subject : null;
   }
 
+  const desiredMid: Record<string, number> = { Konu: 1, Soru: 3, Tekrar: 5 } as any;
   for (const t of tasks) {
     // Choose the best day: with enough remaining minutes, not off, subject rotation preferred, earlier in week
     let bestDay = -1;
@@ -175,9 +176,11 @@ export function optimizeWeekSchedule(opts: OptimizeOptions): WeekSchedule {
     for (const d of dayPref) {
       if (off.has(d)) continue;
       const left = remain[d] || 0;
+      const alignPenalty = Math.abs(d - (desiredMid[t.part.part] ?? 3)) * 5;
       const score = (left - t.part.minutes) // prefer enough capacity
         - (lastSubjectOfDay(d) === t.subject ? 50 : 0) // avoid same subject consecutive
-        + (20 - d); // early in week bonus
+        + (20 - d) // early in week baseline bonus
+        - alignPenalty; // align part to week phase (Konu early, Soru mid, Tekrar late)
       if (left >= t.part.minutes && score > bestScore) {
         bestScore = score;
         bestDay = d;

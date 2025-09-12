@@ -320,20 +320,21 @@ export function loadExamPrefs(userId: string): ExamPrefs {
   try {
     const raw = localStorage.getItem(examPrefsKey(userId));
     if (!raw) {
-      const d: ExamPrefs = { weekly: true, day: 6, minutes: 180, analysisDay: 0, analysisMinutes: 60 };
+      // Best-practice defaults: Deneme Cmt (5), Analiz Paz (6)
+      const d: ExamPrefs = { weekly: true, day: 5, minutes: 180, analysisDay: 6, analysisMinutes: 90 };
       localStorage.setItem(examPrefsKey(userId), JSON.stringify(d));
       return d;
     }
     const p = JSON.parse(raw);
     return {
       weekly: !!p.weekly,
-      day: (p.day ?? 6),
+      day: (p.day ?? 5),
       minutes: (p.minutes ?? 180),
-      analysisDay: (p.analysisDay ?? 0),
-      analysisMinutes: (p.analysisMinutes ?? 60),
+      analysisDay: (p.analysisDay ?? 6),
+      analysisMinutes: (p.analysisMinutes ?? 90),
     } as ExamPrefs;
   } catch {
-    return { weekly: true, day: 6, minutes: 180, analysisDay: 0, analysisMinutes: 60 };
+    return { weekly: true, day: 5, minutes: 180, analysisDay: 6, analysisMinutes: 90 };
   }
 }
 
@@ -351,15 +352,16 @@ export function loadAvailability(userId: string): Availability {
   try {
     const raw = localStorage.getItem(availabilityKey(userId));
     if (!raw) {
-      const def: Availability = [120, 120, 120, 120, 120, 60, 60];
+      // Balanced default: Hafta içi 150', Cmt 240', Paz 180'
+      const def: Availability = [150, 150, 150, 150, 150, 240, 180];
       localStorage.setItem(availabilityKey(userId), JSON.stringify(def));
       return def;
     }
     const arr = JSON.parse(raw);
     if (Array.isArray(arr) && arr.length === 7) return arr as Availability;
-    return [120, 120, 120, 120, 120, 60, 60];
+    return [150, 150, 150, 150, 150, 240, 180];
   } catch {
-    return [120, 120, 120, 120, 120, 60, 60];
+    return [150, 150, 150, 150, 150, 240, 180];
   }
 }
 

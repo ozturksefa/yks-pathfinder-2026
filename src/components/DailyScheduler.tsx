@@ -21,7 +21,8 @@ export const DailyScheduler = () => {
   const week = useMemo(() => currentWeekFrom(studyPlan.startDate), []);
   const [avail, setAvail] = useState<number[]>(() => loadAvailability(userId));
   const [schedule, setSchedule] = useState<WeekSchedule>(() => loadSchedule(userId, week));
-  const [offDays, setOffDays] = useState<boolean[]>([false, false, false, false, false, false, true]);
+  // Varsayılan: tatilsiz (kullanıcı isterse işaretler)
+  const [offDays, setOffDays] = useState<boolean[]>([false, false, false, false, false, false, false]);
   const examDefaults = loadExamPrefs(userId);
   const [examDay, setExamDay] = useState<number | null>(examDefaults.weekly ? examDefaults.day : 6);
   const [examMinutes, setExamMinutes] = useState<number>(examDefaults.minutes);

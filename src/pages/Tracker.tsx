@@ -15,6 +15,7 @@ import { PomodoroSettings } from "@/components/PomodoroSettings";
 import { loadPomodoroSettings } from "@/lib/storage";
 import { toast } from "@/components/ui/sonner";
 import { decomposeTopic, totalSubtasksForPlan, optimizeWeekSchedule } from "@/lib/schedule";
+import { studyPlan } from "@/data/studyPlan";
 
 const LogButton = ({ topicKey, topicTitle }: { topicKey: string; topicTitle: string }) => {
   const [open, setOpen] = useState(false);
@@ -28,6 +29,7 @@ const LogButton = ({ topicKey, topicTitle }: { topicKey: string; topicTitle: str
   );
 };
 
+/* moved: studyPlan now imported from data/studyPlan for single source of truth
 const studyPlan = {
   startDate: "2025-09-10",
   examDate: "2026-06-21",
@@ -410,7 +412,7 @@ const studyPlan = {
       focus: "Sınav performansı"
     }
   }
-};
+};*/
 
 export const Tracker = () => {
   const [activeView, setActiveView] = useState<"weekly" | "monthly">("weekly");
@@ -665,7 +667,7 @@ export const Tracker = () => {
   };
 
   const weekDates = (weekNum: number) => {
-    const startDate = new Date("2025-09-10");
+    const startDate = new Date(studyPlan.startDate);
     const weekStart = new Date(startDate.getTime() + (weekNum - 1) * 7 * 24 * 60 * 60 * 1000);
     const weekEnd = new Date(weekStart.getTime() + 6 * 24 * 60 * 60 * 1000);
     
@@ -693,7 +695,13 @@ export const Tracker = () => {
               YKS 2026 Plan Takibi
             </h1>
             <p className="text-lg text-muted-foreground">
-              10 Eylül 2025 - 21 Haziran 2026 • 40 Haftalık Süreç
+              {(() => {
+                const s = new Date(studyPlan.startDate);
+                const e = new Date(studyPlan.examDate);
+                const sStr = s.toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric' });
+                const eStr = e.toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric' });
+                return `${sStr} - ${eStr} • ${studyPlan.totalWeeks} Haftalık Süreç`;
+              })()}
             </p>
           </div>
 
