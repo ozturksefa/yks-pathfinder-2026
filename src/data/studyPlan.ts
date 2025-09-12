@@ -24,7 +24,7 @@ export const studyPlan = {
       topics: [
         "TYT Mat: Bölünebilme, EBOB-EKOK, Rasyonel Sayılar",
         "TYT Türkçe: Paragraf, Cümlede Anlam",
-        "TYT Kimya: Kimya Bilimi, Atomun Yapısı",
+        "TYT Kimya: Ki mya Bilimi, Atomun Yapısı",
       ],
       focus: "Temel matematiksel düşünce",
     },
